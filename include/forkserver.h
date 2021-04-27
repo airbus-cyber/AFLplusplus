@@ -77,6 +77,9 @@ typedef struct afl_forkserver {
 
   bool qemu_mode;                       /* if running in qemu mode or not   */
 
+  bool socket_mode;                      /* Running in socket mode?         */
+  u32 socket_port ;
+
   bool use_stdin;                       /* use stdin for sending data       */
 
   bool no_unlink;                       /* do not unlink cur_input          */

@@ -46,6 +46,7 @@
 #include "forkserver.h"
 #include "common.h"
 #include "hash.h"
+#include "socket-server.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -490,7 +491,7 @@ typedef struct afl_state {
 
   u8 schedule;                          /* Power schedule (default: EXPLORE)*/
   u8 havoc_max_mult;
-
+  
   u8 skip_deterministic,                /* Skip deterministic stages?       */
       use_splicing,                     /* Recombine input files?           */
       non_instrumented_mode,            /* Run in non-instrumented mode?    */

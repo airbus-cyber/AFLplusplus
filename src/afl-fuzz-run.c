@@ -58,6 +58,12 @@ fuzz_run_target(afl_state_t *afl, afl_forkserver_t *fsrv, u32 timeout) {
 
 #endif
 
+  if (fsrv->socket_mode)
+  {
+      reset_prev_loc();
+      ;;
+  }
+
   fsrv_run_result_t res = afl_fsrv_run_target(fsrv, timeout, &afl->stop_soon);
 
 #ifdef PROFILING

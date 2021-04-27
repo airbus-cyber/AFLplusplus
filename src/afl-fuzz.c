@@ -113,6 +113,7 @@ static void usage(u8 *argv0, int more_help) {
       "  -U            - use unicorn-based instrumentation (Unicorn mode)\n"
       "  -W            - use qemu-based instrumentation with Wine (Wine "
       "mode)\n\n"
+      "  -Y tcp_port   - use socket API\n"
 
       "Mutator settings:\n"
       "  -D            - enable deterministic fuzzing (once per queue entry)\n"
@@ -363,7 +364,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
   while ((opt = getopt(
               argc, argv,
-              "+b:B:c:CdDe:E:hi:I:f:F:l:L:m:M:nNo:p:RQs:S:t:T:UV:Wx:Z")) > 0) {
+              "+b:B:c:CdDe:E:hi:I:f:F:l:L:m:M:nNo:p:RQs:S:t:T:UV:Wx:Y:Z")) > 0) {
 
     switch (opt) {
 
@@ -780,6 +781,23 @@ int main(int argc, char **argv_orig, char **envp) {
 
         break;
 
+      case 'Y':
+        if (afl->fsrv.socket_mode)
+        {
+            FATAL("Multiple -Y options not supported");
+        }
+
+        afl->fsrv.socket_mode = true;
+        if (sscanf(optarg, "%u", &afl->fsrv.socket_port) < 1 || optarg[0] == '-') {
+            FATAL("Bad syntax used for -Y");
+        }
+
+        if ((afl->fsrv.socket_port < 1025) || (afl->fsrv.socket_port > 65535)) {
+            FATAL("Bad tcp port");
+        }
+
+        break;
+
       case 'W':                                           /* Wine+QEMU mode */
 
         if (afl->use_wine) { FATAL("Multiple -W options not supported"); }
@@ -1087,6 +1105,7 @@ int main(int argc, char **argv_orig, char **envp) {
     if (afl->crash_mode) { FATAL("-C and -n are mutually exclusive"); }
     if (afl->fsrv.qemu_mode) { FATAL("-Q and -n are mutually exclusive"); }
     if (afl->unicorn_mode) { FATAL("-U and -n are mutually exclusive"); }
+    if (afl->fsrv.socket_mode) { FATAL("-Y and -n are mutually exclusive"); }
 
   }
 
@@ -1100,7 +1119,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
   if (unlikely(afl->afl_env.afl_statsd)) { statsd_setup_format(afl); }
 
-  if (strchr(argv[optind], '/') == NULL && !afl->unicorn_mode) {
+  if (strchr(argv[optind], '/') == NULL && !afl->unicorn_mode && !afl->fsrv.socket_mode) {
 
     WARNF(cLRD
           "Target binary called without a prefixed path, make sure you are "
@@ -1273,7 +1292,7 @@ int main(int argc, char **argv_orig, char **envp) {
 
   }
 
-  afl->fsrv.use_fauxsrv = afl->non_instrumented_mode == 1 || afl->no_forkserver;
+  afl->fsrv.use_fauxsrv = afl->non_instrumented_mode == 1 || afl->no_forkserver || afl->fsrv.socket_mode;
 
   if (getenv("LD_PRELOAD")) {
 
@@ -1513,7 +1532,18 @@ int main(int argc, char **argv_orig, char **envp) {
 
   }
 
-  if (afl->non_instrumented_mode || afl->fsrv.qemu_mode || afl->unicorn_mode) {
+  if (afl->fsrv.socket_mode)
+  {
+      int res_stcp = 0;
+      res_stcp = start_server_tcp(&afl->fsrv);
+      if (res_stcp < 0)
+      {
+          FATAL("Unable to start tcp server");
+      }
+  }
+
+
+  if (afl->non_instrumented_mode || afl->fsrv.qemu_mode || afl->unicorn_mode || afl->fsrv.socket_mode) {
 
     map_size = afl->fsrv.map_size = MAP_SIZE;
     afl->virgin_bits = ck_realloc(afl->virgin_bits, map_size);
@@ -1533,10 +1563,10 @@ int main(int argc, char **argv_orig, char **envp) {
       afl_shm_init(&afl->shm, afl->fsrv.map_size, afl->non_instrumented_mode);
 
   if (!afl->non_instrumented_mode && !afl->fsrv.qemu_mode &&
-      !afl->unicorn_mode) {
+      !afl->unicorn_mode && !afl->fsrv.socket_mode) {
 
     if (map_size <= DEFAULT_SHMEM_SIZE && !afl->non_instrumented_mode &&
-        !afl->fsrv.qemu_mode && !afl->unicorn_mode) {
+        !afl->fsrv.qemu_mode && !afl->unicorn_mode && !afl->fsrv.socket_mode) {
 
       afl->fsrv.map_size = DEFAULT_SHMEM_SIZE;  // dummy temporary value
       char vbuf[16];
@@ -1593,7 +1623,7 @@ int main(int argc, char **argv_orig, char **envp) {
     if ((map_size <= DEFAULT_SHMEM_SIZE ||
          afl->cmplog_fsrv.map_size < map_size) &&
         !afl->non_instrumented_mode && !afl->fsrv.qemu_mode &&
-        !afl->unicorn_mode) {
+        !afl->unicorn_mode && !afl->fsrv.socket_mode) {
 
       afl->cmplog_fsrv.map_size = MAX(map_size, (u32)DEFAULT_SHMEM_SIZE);
       char vbuf[16];
@@ -2081,6 +2111,13 @@ stop_fuzzing:
   unsetenv(SHM_ENV_VAR);
   unsetenv(CMPLOG_SHM_ENV_VAR);
   afl_shm_deinit(&afl->shm);
+
+  if (afl->fsrv.socket_mode) {
+      // close socket
+      stop_server_tcp();
+  }
+
+
 
   if (afl->shm_fuzz) {
 
